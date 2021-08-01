@@ -10,11 +10,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name='opal-fetcher-postgres',
-    version='0.0.1',
-    author='Asaf Cohen',
-    author_email="asaf@authorizon.com",
-    description="An OPAL fetch provider to bring authorization state from Postgres DB.",
+    name='opal-fetcher-ldap',
+    version='1.0.0',
+    author='Phillip Kuhrt',
+    author_email="mail@phi1010.com",
+    description="An OPAL fetch provider to bring authorization state from LDAP.",
     long_description_content_type="text/markdown",
     long_description=long_description,
     url="https://github.com/authorizon/opal-fetcher-postgres",
@@ -24,7 +24,7 @@ setup(
         'License :: OSI Approved :: Apache Software License',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.7',
+        #'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9'
     ],

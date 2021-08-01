@@ -14,23 +14,24 @@ services:
       - POSTGRES_PASSWORD=postgres
   # example postgresdb with data that opal-client can pull and store in OPA cache
   example_db:
-    image: postgres
+    image: bitnami/openldap
     restart: always
+    ports:
+      - '1389:1389'
+      - '1636:1636'
     environment:
-      - POSTGRES_DB=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      LDAP_ADMIN_USERNAME: admin
+      LDAP_ADMIN_PASSWORD: adminpassword
+      #LDAP_USERS: user01,user02
+      #LDAP_PASSWORDS: password1,password2
+      LDAP_CUSTOM_LDIF_DIR: /ldif
     logging:
       options:
         max-size: 10m
         max-file: "3"
-    ports:
-      - '5438:5432'
     volumes:
-      # copy the sql script to create tables
-      - ./sql/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
-      # copy the sql script to fill tables
-      - ./sql/fill_tables.sql:/docker-entrypoint-initdb.d/fill_tables.sql
+      - 'openldap_data:/bitnami/openldap'
+      - './ldif:/ldif:ro'
   opal_server:
     # by default we run opal-server from latest official image
     image: authorizon/opal-server:latest
