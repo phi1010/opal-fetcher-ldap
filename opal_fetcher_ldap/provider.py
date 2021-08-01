@@ -5,6 +5,7 @@ This fetcher also serves as an example how to build custom OPAL Fetch Providers.
 """
 from typing import Optional, List
 
+from distutils.util import strtobool
 from pydantic import BaseModel, Field
 from tenacity import wait, stop, retry_unless_exception_type
 
@@ -12,6 +13,7 @@ from opal_common.fetcher.fetch_provider import BaseFetchProvider
 from opal_common.fetcher.events import FetcherConfig, FetchEvent
 from opal_common.logger import logger
 
+import ldap3
 
 class LdapConnectionParams(BaseModel):
     # TODO
@@ -19,11 +21,13 @@ class LdapConnectionParams(BaseModel):
     if one does not want to pass all Ldap arguments in the dsn (in OPAL - the url is the dsn),
     one can also use this dict to pass specific arguments.
     """
-    database: Optional[str] = Field(None, description="the database name")
+    root: Optional[str] = Field(None, description="the root dn")
+    search: Optional[str] = Field(None, description="the search query")
     user: Optional[str] = Field(None, description="user name used to authenticate")
     password: Optional[str] = Field(None, description="password used to authenticate")
     host: Optional[str] = Field(None, description="database host address (defaults to UNIX socket if not provided)")
     port: Optional[str] = Field(None, description="connection port number (defaults to 5432 if not provided)")
+    tls: Optional[str] = Field(None, description="whether to enable tls")
 
 
 class LdapFetcherConfig(FetcherConfig):
