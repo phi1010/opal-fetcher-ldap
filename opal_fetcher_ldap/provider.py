@@ -3,7 +3,8 @@ Simple fetch provider for ldap.
 
 This fetcher also serves as an example how to build custom OPAL Fetch Providers.
 """
-from typing import Optional, List
+import json
+from typing import Optional, List, Dict
 
 from distutils.util import strtobool
 from pydantic import BaseModel, Field
@@ -15,23 +16,18 @@ from opal_common.logger import logger
 
 import ldap3
 
+
 class LdapConnectionParams(BaseModel):
-    # TODO
     """
     if one does not want to pass all Ldap arguments in the dsn (in OPAL - the url is the dsn),
     one can also use this dict to pass specific arguments.
     """
-    root: Optional[str] = Field(None, description="the root dn")
-    search: Optional[str] = Field(None, description="the search query")
     user: Optional[str] = Field(None, description="user name used to authenticate")
     password: Optional[str] = Field(None, description="password used to authenticate")
-    host: Optional[str] = Field(None, description="database host address (defaults to UNIX socket if not provided)")
-    port: Optional[str] = Field(None, description="connection port number (defaults to 5432 if not provided)")
-    tls: Optional[str] = Field(None, description="whether to enable tls")
+    url: str = Field(None, description="database host address (e.g. ldaps://localhost:636)")
 
 
 class LdapFetcherConfig(FetcherConfig):
-    # TODO
     """
     Config for LdapFetchProvider, instance of `FetcherConfig`.
     
@@ -45,13 +41,14 @@ class LdapFetcherConfig(FetcherConfig):
         - In this example: since we pull data from LdapQL - we added a `query` key to hold the SQL query.
     """
     fetcher: str = "LdapFetchProvider"
-    connection_params: Optional[LdapConnectionParams] = Field(None, description="these params can override or complement parts of the dsn (connection string)")
-    query: str = Field(..., description="the query to run against Ldap in order to fetch the data")
-    fetch_one: bool = Field(False, description="whether we fetch only one row from the results of the SELECT query")
+    connection_params: Optional[LdapConnectionParams] = Field(None,
+                                                              description="these params can override or complement parts of the dsn (connection string)")
+    root: str = Field(None, description="the root dn")
+    search: str = Field(None, description="the search query")
+    attributes: List[str] = Field(None, description="list of attributes")
 
 
 class LdapFetchEvent(FetchEvent):
-    # TODO
     """
     A FetchEvent shape for the Ldap Fetch Provider.
 
@@ -63,7 +60,6 @@ class LdapFetchEvent(FetchEvent):
 
 
 class LdapFetchProvider(BaseFetchProvider):
-    # TODO
     """
     An OPAL fetch provider for ldap.
 
@@ -90,7 +86,7 @@ class LdapFetchProvider(BaseFetchProvider):
     RETRY_CONFIG = {
         'wait': wait.wait_random_exponential(),
         'stop': stop.stop_after_attempt(10),
-        'retry': retry_unless_exception_type(DataError), # query error (i.e: invalid table, etc)
+        # 'retry': retry_unless_exception_type(SomeError), # query error (i.e: invalid table, etc)
         'reraise': True
     }
 
@@ -98,59 +94,72 @@ class LdapFetchProvider(BaseFetchProvider):
         if event.config is None:
             event.config = LdapFetcherConfig()
         super().__init__(event)
-        self._connection: Optional[asyncpg.Connection] = None
-        self._transaction: Optional[Transaction] = None
+        self._server: Optional[ldap3.Server] = None
+        self._connection: Optional[ldap3.Connection] = None
 
     def parse_event(self, event: FetchEvent) -> LdapFetchEvent:
         return LdapFetchEvent(**event.dict(exclude={"config"}), config=event.config)
 
     async def __aenter__(self):
-        self._event: LdapFetchEvent # type casting
-
+        self._event: LdapFetchEvent  # type casting
+        # TODO should we use this?
         dsn: str = self._event.url
-        connection_params: dict = {} if self._event.config.connection_params is None else self._event.config.connection_params.dict(exclude_none=True)
+        connection_params = self._event.config.connection_params
 
         # connect to the Ldap database
-        self._connection: asyncpg.Connection = await asyncpg.connect(dsn, **connection_params)
-        # start a readonly transaction (we don't want OPAL client writing data due to security!)
-        self._transaction: Transaction = self._connection.transaction(readonly=True)
-        await self._transaction.__aenter__()
+        connection_params: LdapConnectionParams
+        self._server = ldap3.Server(host=connection_params.url)
+        self._connection = ldap3.Connection(
+            server=self._server,
+            user=connection_params.user,
+            password=connection_params.password,
+            auto_bind=True,
+            auto_range=True,
+            read_only=True,
+        )
+        # TODO use a threadpoolexecutor for this?
+        self._connection.open()
 
         return self
 
     async def __aexit__(self, exc_type=None, exc_val=None, tb=None):
-        # End the transaction
-        if self._transaction is not None:
-            await self._transaction.__aexit__(exc_type, exc_val, tb)
-        # Close the connection
         if self._connection is not None:
-            await self._connection.close()
+            # unbind: disconnect and close the connection
+            self._connection.unbind()
 
     async def _fetch_(self):
-        self._event: LdapFetchEvent # type casting
-        
+        self._event: LdapFetchEvent  # type casting
+
         if self._event.config is None:
-            logger.warning("incomplete fetcher config: Ldap data entries require a query to specify what data to fetch!")
+            logger.warning(
+                "incomplete fetcher config: Ldap data entries require a query to specify what data to fetch!")
             return
-        
+
         logger.debug(f"{self.__class__.__name__} fetching from {self._url}")
+        root_dn = self._event.config.root
+        search_query = self._event.config.search
+        attributes = self._event.config.attributes
+        # This should also support MS AD with 1000+ entries
+        return self._connection.extend.standard.paged_search(
+            search_base=root_dn,
+            search_filter=search_query,
+            attributes=attributes,
+            paged_size=100,
+        )
 
-        if self._event.config.fetch_one:
-            row = await self._connection.fetchrow(self._event.config.query)
-            return [row]
-        else:
-            return await self._connection.fetch(self._event.config.query)
-
-    async def _process_(self, records: List[asyncpg.Record]):
-        self._event: LdapFetchEvent # type casting
-        
-        # when fetch_one is true, we want to return a dict (and not a list)
-        if self._event.config.fetch_one:
-            if records and len(records) > 0:
-                # we transform the asyncpg record to a dict that we can be later serialized to json
-                return dict(records[0])
-            else:
-                return {}
-        else:
-            # we transform the asyncpg records to a list-of-dicts that we can be later serialized to json
-            return [dict(record) for record in records]
+    async def _process_(self, records: List[Dict]):
+        self._event: LdapFetchEvent  # type casting
+        attributes = self._event.config.attributes
+        # we transform the asyncpg records to a list-of-dicts that we can be later serialized to json
+        values = {
+            (dn := record)["dn"]:
+                {
+                    attribute:
+                        record["attributes"][attribute]
+                    for attribute in attributes
+                    if attribute in record["attributes"]
+                }
+            for record in records
+            if record["type"] == "searchResEntry"}
+        logger.info(json.dumps(values))
+        return values

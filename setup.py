@@ -17,7 +17,7 @@ setup(
     description="An OPAL fetch provider to bring authorization state from LDAP.",
     long_description_content_type="text/markdown",
     long_description=long_description,
-    url="https://github.com/authorizon/opal-fetcher-postgres",
+    url="https://github.com/phi1010/opal-fetcher-ldap",
     packages=find_packages(),
     classifiers=[
         'Operating System :: OS Independent',
